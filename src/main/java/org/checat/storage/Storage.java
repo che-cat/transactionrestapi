@@ -71,8 +71,13 @@ public class Storage {
         }
     }
 
+    /**
+     * Return an Account object for given id. Creates new account if nothing found.
+     * @param id long Id of account to search.
+     * @return Account object.
+     */
     @NotNull
-    Account getAccount(long id) {
+    public Account getAccount(long id) {
         lock.lock();
         try {
             return accounts.computeIfAbsent(id, Account::new);
@@ -113,6 +118,16 @@ public class Storage {
         } finally {
             lock.unlock();
         }
+    }
+
+    /**
+     * Used to reset storage to start state in tests.
+     */
+    public void reset() {
+        accounts.clear();
+        accountLocks.clear();
+        transactions.clear();
+        max_transaction_id = 0;
     }
 
 }
