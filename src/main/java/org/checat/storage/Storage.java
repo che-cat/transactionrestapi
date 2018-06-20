@@ -1,42 +1,45 @@
 package org.checat.storage;
 
 import com.sun.istack.internal.Nullable;
-import org.checat.model.Account;
 
 import javax.validation.constraints.NotNull;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.function.Function;
-import java.util.function.Predicate;
-import java.util.function.UnaryOperator;
 
 
 public class Storage {
 
-    private final Map<Long, StoredAccount> accounts = new HashMap<>();
+    public static final Storage STORAGE = new Storage();
+
+    private final Map<Long, Account> accounts = new HashMap<>();
     private final Map<Long, Lock> accountLocks = new HashMap<>();
-    private final Map<Long, StoredTransaction> transactions = new HashMap<>();
+    private final Map<Long, Transaction> transactions = new HashMap<>();
 
     private long max_transaction_id = 0;
 
     private final Lock lock = new ReentrantLock();
 
+    private Storage() {}
+
+    /**
+     * Creates DataTransaction object to manipulate data in storage.
+     * @return new DataTransaction object.
+     */
     public DataTransaction startDataTransaction() {
         return new DataTransaction(this);
     }
 
-    public Lock getAccountLock(long id) {
-        lock.lock();
-        try {
-            return accountLocks.computeIfAbsent(id, unused_key -> new ReentrantLock());
-        } finally {
-            lock.unlock();
-        }
-    }
-
+    /**
+     * Requests transaction with specific id.
+     * @param id long Id of requested transaction.
+     * @return Transaction object or null if not present.
+     */
     @Nullable
-    public StoredTransaction getTransaction(long id) {
+    public Transaction getTransaction(long id) {
         lock.lock();
         try {
             return transactions.get(id);
@@ -45,18 +48,41 @@ public class Storage {
         }
     }
 
-    @NotNull
-    StoredAccount getAccount(long id) {
+    /**
+     * Request all transactions.
+     * @return copy of container containing all transactions.
+     */
+    public Collection<Transaction> getTransactions() {
         lock.lock();
         try {
-            return accounts.computeIfAbsent(id, StoredAccount::new);
+            return new ArrayList<>(transactions.values());
+        } finally {
+            lock.unlock();
+        }
+    }
+
+
+    Lock getAccountLock(long id) {
+        lock.lock();
+        try {
+            return accountLocks.computeIfAbsent(id, unused_key -> new ReentrantLock());
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    @NotNull
+    Account getAccount(long id) {
+        lock.lock();
+        try {
+            return accounts.computeIfAbsent(id, Account::new);
         } finally {
             lock.unlock();
         }
 
     }
 
-    void updateAccount(StoredAccount account) {
+    void updateAccount(Account account) {
         lock.lock();
         try {
             accounts.put(account.getId(), account);
@@ -65,7 +91,7 @@ public class Storage {
         }
     }
 
-    public void updateTransaction(StoredTransaction transaction) {
+    void updateTransaction(Transaction transaction) {
         lock.lock();
         try {
             transactions.put(transaction.getId(), transaction);
@@ -74,13 +100,13 @@ public class Storage {
         }
     }
 
-    public Long insertTransaction(long source_id, long destination_id, long amount) {
+    Long insertTransaction(long source_id, long destination_id, long amount) {
         lock.lock();
         try {
-            StoredTransaction tr = new StoredTransaction(max_transaction_id + 1,
+            Transaction tr = new Transaction(max_transaction_id + 1,
                     source_id,
                     destination_id,
-                    amount, StoredTransaction.State.INITIATED);
+                    amount, Transaction.State.INITIATED);
             transactions.put(tr.getId(), tr);
             max_transaction_id++;
             return tr.getId();
@@ -89,7 +115,4 @@ public class Storage {
         }
     }
 
-    public Collection<StoredTransaction> getTransactions() {
-        return transactions.values();
-    }
 }

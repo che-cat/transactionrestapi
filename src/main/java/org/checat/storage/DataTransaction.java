@@ -1,20 +1,17 @@
 package org.checat.storage;
 
-import com.sun.org.apache.xpath.internal.operations.Bool;
-import org.checat.model.Transaction;
 import org.glassfish.jersey.internal.util.Producer;
 
 import java.util.*;
-import java.util.concurrent.Callable;
 import java.util.concurrent.locks.Lock;
-import java.util.function.BiFunction;
 import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
-import java.util.stream.Collectors;
+
 
 public class DataTransaction {
     private final List<Producer<Optional<Long>>> operations = new LinkedList<>();
     private final Storage storage;
+    // Should be ordered to avoid deadlocks.
     private final Set<Long> lockIds = new TreeSet<>();
     private final List<Producer<Boolean>> conditions = new LinkedList<>();
 
@@ -22,12 +19,24 @@ public class DataTransaction {
         this.storage = storage;
     }
 
+    /**
+     * Adds lock corresponding to account with specified id to execution of transaction.
+     * The method does nothing If lockId isn't internal.
+     * @param lockId id of lock to hold.
+     */
     private void addLock(Long lockId) {
-        this.lockIds.add(lockId);
+        if (Account.isAccountInternal(lockId)) {
+            this.lockIds.add(lockId);
+        }
     }
 
-    public void addTransactionCondition(long id, Predicate<StoredTransaction> condition) {
-        StoredTransaction transaction = storage.getTransaction(id);
+    /**
+     * Add condition that transaction with particular id exists and matches predicate.
+     * @param id long Id of transaction to test. It should already exist at time of call to this method.
+     * @param condition Predicate that tests transaction.
+     */
+    public void addTransactionCondition(long id, Predicate<Transaction> condition) {
+        Transaction transaction = storage.getTransaction(id);
         if (transaction != null) {
             addLock(transaction.getSource());
             addLock(transaction.getDestination());
@@ -37,12 +46,22 @@ public class DataTransaction {
         }
     }
 
-    public void addAccountCondition(long id, Predicate<StoredAccount> condition) {
+    /**
+     * Add condition that account with particular id matches predicate.
+     * @param id long Id of account to test.
+     * @param condition Predicate that test account.
+     */
+    public void addAccountCondition(long id, Predicate<Account> condition) {
         addLock(id);
         conditions.add(() -> condition.test(storage.getAccount(id)));
     }
 
-    public void updateAccout(long id, UnaryOperator<StoredAccount> updater) {
+    /**
+     * Add updater, that will construct new Account object instead of one with specified id.
+     * @param id long Id of account to update.
+     * @param updater UnaryOperator that updates produces new Account object.
+     */
+    public void updateAccout(long id, UnaryOperator<Account> updater) {
         addLock(id);
         operations.add(() -> {
             storage.updateAccount(updater.apply(storage.getAccount(id)));
@@ -50,7 +69,12 @@ public class DataTransaction {
         });
     }
 
-    public void updateTransaction(long id, UnaryOperator<StoredTransaction> updater) {
+    /**
+     * Add updater, that will construct new Account object instead of one with specified id.
+     * @param id long Id of account to update.
+     * @param updater UnaryOperator that updates produces new Account object.
+     */
+    public void updateTransaction(long id, UnaryOperator<Transaction> updater) {
         addTransactionCondition(id, Objects::nonNull);
         operations.add(() -> {
             storage.updateTransaction(updater.apply(storage.getTransaction(id)));
@@ -58,6 +82,12 @@ public class DataTransaction {
         });
     }
 
+    /**
+     * Add operation that will insert new Transaction into storage.
+     * @param source_id long Id of payer account.
+     * @param destination_id long Id of payee account.
+     * @param amount long money to pay.
+     */
     public void insertTransaction(long source_id,
                                   long destination_id,
                                   long amount) {
@@ -66,6 +96,10 @@ public class DataTransaction {
         operations.add(() -> Optional.of(storage.insertTransaction(source_id, destination_id, amount)));
     }
 
+    /**
+     * Executes all stored operations.
+     * @return List of ids of all inserted transactions.
+     */
     public List<Long> commit() {
         Stack<Lock> lockedLocks = new Stack<>();
         try {
@@ -78,11 +112,10 @@ public class DataTransaction {
                     .map(Producer::call)
                     .reduce(true, (l, r) -> l && r);
             if (condition_result) {
-                return operations.stream()
-                        .map(Producer::call)
-                        .filter(Optional::isPresent)
-                        .map(Optional::get)
-                        .collect(Collectors.toList());
+                List<Long> result = new ArrayList<>();
+                operations.stream()
+                        .forEachOrdered(op -> op.call().ifPresent(result::add));
+                return result;
             } else {
                 return Collections.emptyList();
             }
