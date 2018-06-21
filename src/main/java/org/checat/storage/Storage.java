@@ -1,6 +1,5 @@
 package org.checat.storage;
 
-import com.sun.istack.internal.Nullable;
 
 import javax.validation.constraints.NotNull;
 import java.util.ArrayList;
@@ -38,7 +37,6 @@ public class Storage {
      * @param id long Id of requested transaction.
      * @return Transaction object or null if not present.
      */
-    @Nullable
     public Transaction getTransaction(long id) {
         lock.lock();
         try {
